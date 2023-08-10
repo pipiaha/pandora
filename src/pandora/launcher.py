@@ -16,6 +16,9 @@ from .exts.token import check_access_token_out
 from .openai.api import ChatGPT
 from .openai.auth import Auth0
 from .openai.utils import Console
+from exts.config import DATABASE_URI
+
+
 
 if 'nt' == os.name:
     import pyreadline3 as readline
@@ -186,12 +189,16 @@ def main():
     if args.api:
         try:
             from .openai.token import gpt_num_tokens
-            from .migrations.migrate import do_migrate
+            # from .migrations.migrate import do_migrate
 
-            do_migrate()
+            # do_migrate()
         except (ImportError, ModuleNotFoundError):
             Console.error_bh('### You need `pip install Pandora-ChatGPT[api]` to support API mode.')
             return
+
+    if DATABASE_URI:
+        from .migrations.migrate import do_migrate
+        do_migrate()
 
     access_tokens = parse_access_tokens(args.tokens_file, args.api) if args.tokens_file else None
 

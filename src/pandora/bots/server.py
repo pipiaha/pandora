@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import logging
 from datetime import timedelta
 from os.path import join, abspath, dirname
@@ -13,6 +12,7 @@ from werkzeug.serving import WSGIRequestHandler
 
 from .. import __version__
 from ..exts.hooks import hook_logging
+from ..migrations.models import ConversationOfficial
 from ..openai.api import API
 
 
@@ -219,8 +219,12 @@ class ChatBot:
         model = payload['model']
         message_id = payload['message_id']
 
-        return self.__proxy_result(
-            self.chatgpt.gen_conversation_title(conversation_id, model, message_id, True, self.__get_token_key()))
+        ret = self.chatgpt.gen_conversation_title(conversation_id, model, message_id, True, self.__get_token_key())
+        conv = ConversationOfficial.get(conversation_id)
+        if not conv and ret:
+            conv.title = ret
+
+        return self.__proxy_result(ret)
 
     def talk(self):
         payload = request.json
@@ -230,6 +234,8 @@ class ChatBot:
         parent_message_id = payload['parent_message_id']
         conversation_id = payload.get('conversation_id')
         stream = payload.get('stream', True)
+
+        ConversationOfficial.new_conversation(conversation_id)
 
         return self.__process_stream(
             *self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id, stream,
