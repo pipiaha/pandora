@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 from datetime import timedelta
+from itertools import tee
 from os.path import join, abspath, dirname
 
 from flask import Flask, jsonify, make_response, request, Response, render_template
@@ -14,6 +15,7 @@ from .. import __version__
 from ..exts.hooks import hook_logging
 from ..migrations.models import ConversationOfficial
 from ..openai.api import API
+from ..openai.utils import Console
 
 
 class ChatBot:
@@ -221,7 +223,7 @@ class ChatBot:
 
         ret = self.chatgpt.gen_conversation_title(conversation_id, model, message_id, True, self.__get_token_key())
         conv = ConversationOfficial.get(conversation_id)
-        if not conv and ret:
+        if conv and ret:
             conv.title = ret
 
         return self.__proxy_result(ret)
@@ -235,11 +237,15 @@ class ChatBot:
         conversation_id = payload.get('conversation_id')
         stream = payload.get('stream', True)
 
-        ConversationOfficial.new_conversation(conversation_id)
+        # ConversationOfficial.new_conversation(conversation_id)
 
-        return self.__process_stream(
-            *self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id, stream,
-                               self.__get_token_key()), stream)
+        talk_gen, cp_gen = tee(self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id, stream,
+                                                 self.__get_token_key()))
+        talk_result = []
+        for item in API.wrap_stream_out(cp_gen,200):
+            talk_result.append(item)
+        Console.warn("gogogo{}".format(talk_result))
+        return self.__process_stream(*talk_gen, stream)
 
     def goon(self):
         payload = request.json

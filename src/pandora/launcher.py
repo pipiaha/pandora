@@ -10,15 +10,12 @@ from rich.prompt import Prompt, Confirm
 from . import __version__
 from .bots.legacy import ChatBot as ChatBotLegacy
 from .bots.server import ChatBot as ChatBotServer
-from .exts.config import USER_CONFIG_DIR, default_api_prefix
+from .exts.config import DATABASE_URI, USER_CONFIG_DIR, default_api_prefix
 from .exts.hooks import hook_except_handle
 from .exts.token import check_access_token_out
 from .openai.api import ChatGPT
 from .openai.auth import Auth0
 from .openai.utils import Console
-from exts.config import DATABASE_URI
-
-
 
 if 'nt' == os.name:
     import pyreadline3 as readline
