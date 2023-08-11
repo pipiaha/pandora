@@ -20,17 +20,30 @@ class API:
         self.ca_bundle = ca_bundle
 
     @staticmethod
-    def wrap_stream_out(generator, status):
+    def wrap_stream_out(generator, status, db_func):
+        talk_json = None
         if status != 200:
             for line in generator:
+                talk_json = talk_json + line
                 yield json.dumps(line)
 
             return
 
         for line in generator:
+            talk_json = line
             yield b'data: ' + json.dumps(line).encode('utf-8') + b'\n\n'
 
+
         yield b'data: [DONE]\n\n'
+
+    # @staticmethod
+    # def __async_process_db_stream(self, talk_json, db_func):
+    #     t = threading.Thread(target=self.__process_db_stream, args=(talk_json, db_func))
+    #     t.start()
+    #
+    # def __process_db_stream(self, talk_json, db_func):
+    #     if talk_json:
+    #         db_func(talk_json)
 
     async def __process_sse(self, resp):
         yield resp.status_code
