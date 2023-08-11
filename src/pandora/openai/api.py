@@ -10,6 +10,7 @@ import httpx
 import requests
 from certifi import where
 
+from .utils import Console
 from .. import __version__
 from ..exts.config import default_api_prefix
 
@@ -20,7 +21,7 @@ class API:
         self.ca_bundle = ca_bundle
 
     @staticmethod
-    def wrap_stream_out(generator, status, db_func):
+    def wrap_stream_out(generator, status, db_func=None):
         talk_json = None
         if status != 200:
             for line in generator:
@@ -33,7 +34,7 @@ class API:
             talk_json = line
             yield b'data: ' + json.dumps(line).encode('utf-8') + b'\n\n'
 
-
+        Console.warn("out:{}".format(talk_json))
         yield b'data: [DONE]\n\n'
 
     # @staticmethod
