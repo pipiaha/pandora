@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+import json
 import logging
+import threading
+from datetime import datetime as dt
 from datetime import timedelta
 from itertools import tee
 from os.path import join, abspath, dirname
@@ -13,7 +16,7 @@ from werkzeug.serving import WSGIRequestHandler
 
 from .. import __version__
 from ..exts.hooks import hook_logging
-from ..migrations.models import ConversationOfficial
+from ..migrations.models import ConversationOfficial, PromptInfo
 from ..openai.api import API
 from ..openai.utils import Console
 
@@ -222,9 +225,12 @@ class ChatBot:
         message_id = payload['message_id']
 
         ret = self.chatgpt.gen_conversation_title(conversation_id, model, message_id, True, self.__get_token_key())
-        conv = ConversationOfficial.get(conversation_id)
-        if conv and ret:
-            conv.title = ret
+        load_obj = json.loads(ret.text)
+        if 'title' in load_obj:
+            conv = ConversationOfficial.get(conversation_id)
+            if conv:
+                conv.title = load_obj['title']
+                conv.save()
 
         return self.__proxy_result(ret)
 
@@ -237,15 +243,64 @@ class ChatBot:
         conversation_id = payload.get('conversation_id')
         stream = payload.get('stream', True)
 
-        # ConversationOfficial.new_conversation(conversation_id)
+        status, header, generator = self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id,
+                                                      stream,
+                                                      self.__get_token_key())
 
-        talk_gen, cp_gen = tee(self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id, stream,
-                                                 self.__get_token_key()))
-        talk_result = []
-        for item in API.wrap_stream_out(cp_gen,200):
-            talk_result.append(item)
-        Console.warn("gogogo{}".format(talk_result))
-        return self.__process_stream(*talk_gen, stream)
+        # self.__async_process_db_stream(generator, lambda g,f:
+        #     user_prompt = PromptInfo()
+        #     user_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+        #     user_prompt.prompt_id = message_id
+        #     user_prompt.parent_id = parent_message_id
+        #     user_prompt.role = 'user'
+        #     user_prompt.model = model
+        #     user_prompt.create_time = dt.now().timestamp()
+        #     user_prompt.content = prompt
+        #     user_prompt.new()
+        #
+        #     assist_prompt = PromptInfo()
+        #     assist_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+        #     assist_prompt.prompt_id = talk_json['message']['id']
+        #     assist_prompt.parent_id = talk_json['message']['metadata']['parent_id']
+        #     assist_prompt.model = talk_json['message']['metadata']['model_slug']
+        #     assist_prompt.create_time = talk_json['message']['create_time']
+        #     assist_prompt.role = talk_json['message']['author']['role']
+        #     assist_prompt.content = talk_json['message']['content']['parts'][0]
+        #     assist_prompt.new()
+        #
+        #     ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'])
+        # )
+
+        origin_gen, cp_gen = tee(generator)
+        talk_result = list(cp_gen)
+        talk_json = None
+        for r in talk_result:
+            talk_json = r
+
+        if talk_json:
+            user_prompt = PromptInfo()
+            user_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+            user_prompt.prompt_id = message_id
+            user_prompt.parent_id = parent_message_id
+            user_prompt.role = 'user'
+            user_prompt.model = model
+            user_prompt.create_time = dt.now().timestamp()
+            user_prompt.content = prompt
+            user_prompt.new()
+
+            assist_prompt = PromptInfo()
+            assist_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+            assist_prompt.prompt_id = talk_json['message']['id']
+            assist_prompt.parent_id = talk_json['message']['metadata']['parent_id']
+            assist_prompt.model = talk_json['message']['metadata']['model_slug']
+            assist_prompt.create_time = talk_json['message']['create_time']
+            assist_prompt.role = talk_json['message']['author']['role']
+            assist_prompt.content = talk_json['message']['content']['parts'][0]
+            assist_prompt.new()
+
+            ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'])
+
+        return self.__process_stream(status, header, generator, stream)
 
     def goon(self):
         payload = request.json
@@ -254,8 +309,29 @@ class ChatBot:
         conversation_id = payload.get('conversation_id')
         stream = payload.get('stream', True)
 
-        return self.__process_stream(
-            *self.chatgpt.goon(model, parent_message_id, conversation_id, stream, self.__get_token_key()), stream)
+        # 追加prompt
+        status, header, generator = self.chatgpt.goon(model, parent_message_id, conversation_id, stream,
+                                                      self.__get_token_key())
+        origin_gen, cp_gen = tee(generator)
+        talk_result = list(cp_gen)
+        talk_json = None
+        for r in talk_result:
+            talk_json = r
+
+        if talk_json:
+            assist_prompt = PromptInfo()
+            assist_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+            assist_prompt.prompt_id = talk_json['message']['id']
+            assist_prompt.parent_id = talk_json['message']['metadata']['parent_id']
+            assist_prompt.model = talk_json['message']['metadata']['model_slug']
+            assist_prompt.create_time = talk_json['message']['create_time']
+            assist_prompt.role = talk_json['message']['author']['role']
+            assist_prompt.content = talk_json['message']['content']['parts'][0]
+            assist_prompt.new()
+        # return self.__process_stream(
+        #     *self.chatgpt.goon(model, parent_message_id, conversation_id, stream, self.__get_token_key()), stream)
+
+        return self.__process_stream(status, header, origin_gen, stream)
 
     def regenerate(self):
         payload = request.json
@@ -270,9 +346,45 @@ class ChatBot:
         parent_message_id = payload['parent_message_id']
         stream = payload.get('stream', True)
 
-        return self.__process_stream(
-            *self.chatgpt.regenerate_reply(prompt, model, conversation_id, message_id, parent_message_id, stream,
-                                           self.__get_token_key()), stream)
+        # 覆盖prompt
+        status, header, generator = self.chatgpt.regenerate_reply(prompt, model, conversation_id, message_id,
+                                                                  parent_message_id, stream,
+                                                                  self.__get_token_key())
+        origin_gen, cp_gen = tee(generator)
+        talk_result = list(cp_gen)
+        talk_json = None
+        for r in talk_result:
+            talk_json = r
+
+        if talk_json:
+            assist_prompt = PromptInfo()
+            assist_prompt.conversation_id = conversation_id or talk_json['conversation_id']
+            assist_prompt.prompt_id = talk_json['message']['id']
+            assist_prompt.parent_id = talk_json['message']['metadata']['parent_id']
+            assist_prompt.model = talk_json['message']['metadata']['model_slug']
+            assist_prompt.create_time = talk_json['message']['create_time']
+            assist_prompt.role = talk_json['message']['author']['role']
+            assist_prompt.content = talk_json['message']['content']['parts'][0]
+            assist_prompt.new()
+
+        # return self.__process_stream(
+        #     *self.chatgpt.regenerate_reply(prompt, model, conversation_id, message_id, parent_message_id, stream,
+        #                                    self.__get_token_key()), stream)
+        return self.__process_stream(status, header, origin_gen, stream)
+
+    def __async_process_db_stream(self, generator, db_func):
+        t = threading.Thread(target=self.__process_db, args=(generator, db_func))
+        t.start()
+
+    @staticmethod
+    def __process_db(generator, db_func):
+        origin_gen, cp_gen = tee(generator)
+        talk_result = list(cp_gen)
+        talk_json = None
+        for r in talk_result:
+            talk_json = r
+        if talk_json:
+            db_func()
 
     @staticmethod
     def __process_stream(status, headers, generator, stream):

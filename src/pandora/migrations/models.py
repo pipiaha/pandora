@@ -128,10 +128,19 @@ class PromptInfo(Base):
     def list_by_conversation_id(conversation_id):
         return session.query(PromptInfo).filter(PromptInfo.conversation_id == conversation_id).all()
 
+    @staticmethod
+    def get(prompt_id, conversation_id):
+        return session.query(PromptInfo).filter(PromptInfo.prompt_id == prompt_id,
+                                                PromptInfo.conversation_id == conversation_id).first()
+
     def new(self):
         session.add(self)
         session.commit()
 
+        return self
+
+    def save(self):
+        session.commit()
         return self
 
     @staticmethod
