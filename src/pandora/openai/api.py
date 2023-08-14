@@ -41,11 +41,6 @@ class API:
         t = threading.Thread(target=API.__process_db_stream, args=(talk_json, db_func))
         t.start()
 
-    # @staticmethod
-    # def __async_process_db_stream(self, talk_json, db_func):
-    #     t = threading.Thread(target=self.__process_db_stream, args=(talk_json, db_func))
-    #     t.start()
-    #
     @staticmethod
     def __process_db_stream(talk_json, db_func):
         if db_func and talk_json:
