@@ -10,7 +10,6 @@ import httpx
 import requests
 from certifi import where
 
-from .utils import Console
 from .. import __version__
 from ..exts.config import default_api_prefix
 
@@ -34,7 +33,6 @@ class API:
             talk_json = line
             yield b'data: ' + json.dumps(line).encode('utf-8') + b'\n\n'
 
-        Console.warn("out:{}".format(talk_json))
         API.__async_process_db_stream(talk_json, db_func)
         yield b'data: [DONE]\n\n'
 
