@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
+import uuid
 from datetime import datetime as dt
 from datetime import timedelta
 from os.path import join, abspath, dirname
@@ -16,6 +17,7 @@ from .. import __version__
 from ..exts.hooks import hook_logging
 from ..migrations.models import ConversationOfficial, PromptInfo
 from ..openai.api import API
+from ..openai.utils import Console
 
 
 class ChatBot:
@@ -123,6 +125,11 @@ class ChatBot:
         if token_key:
             self.__set_cookie(resp, token_key, timedelta(days=30))
 
+        sid = request.cookies.get('seperated_id')
+        if not sid:
+            resp.set_cookie('seperated_id', "{}".format(uuid.uuid4()), max_age=timedelta(days=30), path='/',
+                            domain=None, httponly=True, samesite='Lax')
+
         return resp
 
     @staticmethod
@@ -199,15 +206,28 @@ class ChatBot:
         offset = request.args.get('offset', '0')
         limit = request.args.get('limit', '20')
 
+        sid = request.cookies.get('seperated_id')
+        if sid:
+            conversation_list = ConversationOfficial.wrap_conversation_list(offset, limit, sid)
+            for conversation in conversation_list['items']:
+                if conversation['title'] == 'New chat':
+                    resp = self.get_conversation(conversation['id'])
+                    conversation['title'] = resp.json['title']
+                    ConversationOfficial.new_conversation(conversation['id'], conversation['title'], sid)
+            return jsonify(conversation_list)
         return self.__proxy_result(self.chatgpt.list_conversations(offset, limit, True, self.__get_token_key()))
 
     def get_conversation(self, conversation_id):
         return self.__proxy_result(self.chatgpt.get_conversation(conversation_id, True, self.__get_token_key()))
 
     def del_conversation(self, conversation_id):
+        ConversationOfficial.delete(conversation_id)
         return self.__proxy_result(self.chatgpt.del_conversation(conversation_id, True, self.__get_token_key()))
 
     def clear_conversations(self):
+        sid = request.cookies.get("seperated_id")
+        if sid:
+            ConversationOfficial.clear(sid)
         return self.__proxy_result(self.chatgpt.clear_conversations(True, self.__get_token_key()))
 
     def set_conversation_title(self, conversation_id):
@@ -224,10 +244,11 @@ class ChatBot:
         ret = self.chatgpt.gen_conversation_title(conversation_id, model, message_id, True, self.__get_token_key())
         load_obj = json.loads(ret.text)
         if 'title' in load_obj:
-            conv = ConversationOfficial.get(conversation_id)
-            if conv:
-                conv.title = load_obj['title']
-                conv.save()
+            ConversationOfficial.new_conversation(conversation_id, title=load_obj['title'])
+            # conv = ConversationOfficial.get(conversation_id)
+            # if conv:
+            # conv.title = load_obj['title']
+            # conv.save()
 
         return self.__proxy_result(ret)
 
@@ -243,12 +264,13 @@ class ChatBot:
         status, header, generator = self.chatgpt.talk(prompt, model, message_id, parent_message_id, conversation_id,
                                                       stream,
                                                       self.__get_token_key())
-
+        sid = request.cookies.get('seperated_id')
+        Console.warn("sid:{}".format(sid))
         return self.__process_stream(status, header, generator, stream,
                                      lambda talk_json: self.save_talk(conversation_id,
                                                                       message_id, model,
                                                                       parent_message_id,
-                                                                      prompt, talk_json))
+                                                                      prompt, talk_json, sid))
 
     def goon(self):
         payload = request.json
@@ -284,8 +306,9 @@ class ChatBot:
                                      lambda talk_json: self.save_prompt_info(conversation_id, talk_json))
 
     @staticmethod
-    def save_talk(conversation_id, message_id, model, parent_message_id, prompt, talk_json):
-        ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'])
+    def save_talk(conversation_id, message_id, model, parent_message_id, prompt, talk_json, sid):
+        Console.warn("sid in thread:{}".format(sid))
+        ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'], sid=sid)
         user_prompt = PromptInfo()
         user_prompt.conversation_id = conversation_id or talk_json['conversation_id']
         user_prompt.prompt_id = message_id
@@ -296,6 +319,7 @@ class ChatBot:
         user_prompt.content = prompt
         user_prompt.new()
         ChatBot.save_prompt_info(conversation_id, talk_json)
+        #  title
 
     @staticmethod
     def save_prompt_info(conversation_id, talk_json):
