@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-import threading
 from datetime import datetime as dt
 from datetime import timedelta
-from itertools import tee
 from os.path import join, abspath, dirname
 
 from flask import Flask, jsonify, make_response, request, Response, render_template
@@ -18,7 +16,6 @@ from .. import __version__
 from ..exts.hooks import hook_logging
 from ..migrations.models import ConversationOfficial, PromptInfo
 from ..openai.api import API
-from ..openai.utils import Console
 
 
 class ChatBot:
@@ -247,10 +244,11 @@ class ChatBot:
                                                       stream,
                                                       self.__get_token_key())
 
-        # self.__async_process_db_stream(generator, lambda talk_json: self.save_talk(conversation_id, message_id, model,
-        #                                                                            parent_message_id, prompt,
-        #                                                                            talk_json))
-        return self.__process_stream(status, header, generator, stream)
+        return self.__process_stream(status, header, generator, stream,
+                                     lambda talk_json: self.save_talk(conversation_id,
+                                                                      message_id, model,
+                                                                      parent_message_id,
+                                                                      prompt, talk_json))
 
     def goon(self):
         payload = request.json
@@ -262,8 +260,8 @@ class ChatBot:
         # 追加prompt
         status, header, generator = self.chatgpt.goon(model, parent_message_id, conversation_id, stream,
                                                       self.__get_token_key())
-        # self.__async_process_db_stream(generator, lambda talk_json: self.save_prompt_info(conversation_id, talk_json))
-        return self.__process_stream(status, header, generator, stream)
+        return self.__process_stream(status, header, generator, stream,
+                                     lambda talk_json: self.save_prompt_info(conversation_id, talk_json))
 
     def regenerate(self):
         payload = request.json
@@ -282,24 +280,11 @@ class ChatBot:
         status, header, generator = self.chatgpt.regenerate_reply(prompt, model, conversation_id, message_id,
                                                                   parent_message_id, stream,
                                                                   self.__get_token_key())
-        # self.__async_process_db_stream(generator, lambda talk_json: self.save_prompt_info(conversation_id, talk_json))
-        return self.__process_stream(status, header, generator, stream)
-
-    def __async_process_db_stream(self, generator, db_func):
-        t = threading.Thread(target=self.__process_db_stream, args=(generator, db_func))
-        t.start()
+        return self.__process_stream(status, header, generator, stream,
+                                     lambda talk_json: self.save_prompt_info(conversation_id, talk_json))
 
     @staticmethod
-    def __process_db_stream(generator, db_func):
-        cp_gen, _ = tee(generator)
-        talk_result = list(cp_gen)
-        talk_json = None
-        for r in talk_result:
-            talk_json = r
-        if talk_json:
-            db_func(talk_json)
-
-    def save_talk(self, conversation_id, message_id, model, parent_message_id, prompt, talk_json):
+    def save_talk(conversation_id, message_id, model, parent_message_id, prompt, talk_json):
         ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'])
         user_prompt = PromptInfo()
         user_prompt.conversation_id = conversation_id or talk_json['conversation_id']
@@ -310,7 +295,7 @@ class ChatBot:
         user_prompt.create_time = dt.now().timestamp()
         user_prompt.content = prompt
         user_prompt.new()
-        self.save_prompt_info(conversation_id, talk_json)
+        ChatBot.save_prompt_info(conversation_id, talk_json)
 
     @staticmethod
     def save_prompt_info(conversation_id, talk_json):
@@ -325,15 +310,10 @@ class ChatBot:
         assist_prompt.new()
 
     @staticmethod
-    def __process_stream(status, headers, generator, stream):
-        # out = API.wrap_stream_out(generator, status)
-        # cp, _ = tee(out)
-        # line = None
-        # for item in cp:
-        #     line = item
-        # Console.warn("gogogo{}".format(line))
+    def __process_stream(status, headers, generator, stream, db_func=None):
         if stream:
-            return Response(API.wrap_stream_out(generator, status), mimetype=headers['Content-Type'], status=status)
+            return Response(API.wrap_stream_out(generator, status, db_func), mimetype=headers['Content-Type'],
+                            status=status)
 
         last_json = None
         for json in generator:

@@ -35,16 +35,23 @@ class API:
             yield b'data: ' + json.dumps(line).encode('utf-8') + b'\n\n'
 
         Console.warn("out:{}".format(talk_json))
+        API.__async_process_db_stream(talk_json, db_func)
         yield b'data: [DONE]\n\n'
+
+    @staticmethod
+    def __async_process_db_stream(talk_json, db_func):
+        t = threading.Thread(target=API.__process_db_stream, args=(talk_json, db_func))
+        t.start()
 
     # @staticmethod
     # def __async_process_db_stream(self, talk_json, db_func):
     #     t = threading.Thread(target=self.__process_db_stream, args=(talk_json, db_func))
     #     t.start()
     #
-    # def __process_db_stream(self, talk_json, db_func):
-    #     if talk_json:
-    #         db_func(talk_json)
+    @staticmethod
+    def __process_db_stream(talk_json, db_func):
+        if db_func and talk_json:
+            db_func(talk_json)
 
     async def __process_sse(self, resp):
         yield resp.status_code
