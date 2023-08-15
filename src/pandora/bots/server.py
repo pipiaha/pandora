@@ -17,7 +17,6 @@ from .. import __version__
 from ..exts.hooks import hook_logging
 from ..migrations.models import ConversationOfficial, PromptInfo
 from ..openai.api import API
-from ..openai.utils import Console
 
 
 class ChatBot:
@@ -265,7 +264,6 @@ class ChatBot:
                                                       stream,
                                                       self.__get_token_key())
         sid = request.cookies.get('seperated_id')
-        Console.warn("sid:{}".format(sid))
         return self.__process_stream(status, header, generator, stream,
                                      lambda talk_json: self.save_talk(conversation_id,
                                                                       message_id, model,
@@ -307,7 +305,6 @@ class ChatBot:
 
     @staticmethod
     def save_talk(conversation_id, message_id, model, parent_message_id, prompt, talk_json, sid):
-        Console.warn("sid in thread:{}".format(sid))
         ConversationOfficial.new_conversation(conversation_id or talk_json['conversation_id'], sid=sid)
         user_prompt = PromptInfo()
         user_prompt.conversation_id = conversation_id or talk_json['conversation_id']
