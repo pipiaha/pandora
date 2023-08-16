@@ -49,7 +49,8 @@ class ConversationOfficial(Base):
 
     @staticmethod
     def delete(conversation_id):
-        session.query(ConversationOfficial).filter(ConversationOfficial.conversation_id == conversation_id).delete()
+        (session.query(ConversationOfficial).filter(ConversationOfficial.conversation_id == conversation_id)
+         .update({"seperated_id": None}))
         session.commit()
 
     @staticmethod
