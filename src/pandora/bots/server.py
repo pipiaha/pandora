@@ -129,6 +129,9 @@ class ChatBot:
             resp.set_cookie('seperated_id', "{}".format(uuid.uuid4()), max_age=timedelta(days=30), path='/',
                             domain=None, httponly=True, samesite='Lax')
 
+        t = token_key or "1"
+        resp.set_cookie('t', "{}".format(t), max_age=timedelta(days=30), path='/',
+                        domain=None, httponly=True, samesite='Lax')
         return resp
 
     @staticmethod
@@ -207,12 +210,14 @@ class ChatBot:
 
         sid = request.cookies.get('seperated_id')
         if sid:
-            conversation_list = ConversationOfficial.wrap_conversation_list(offset, limit, sid)
+            t = request.cookies.get('t') or "1"
+            conversation_list = ConversationOfficial.wrap_conversation_list(offset, limit, "{}-ch{}".format(sid, t))
             for conversation in conversation_list['items']:
                 if conversation['title'] == 'New chat':
                     resp = self.get_conversation(conversation['id'])
                     conversation['title'] = resp.json['title']
-                    ConversationOfficial.new_conversation(conversation['id'], conversation['title'], sid)
+                    ConversationOfficial.new_conversation(conversation['id'], conversation['title'],
+                                                          "{}-ch{}".format(sid, t))
             return jsonify(conversation_list)
         return self.__proxy_result(self.chatgpt.list_conversations(offset, limit, True, self.__get_token_key()))
 
@@ -225,8 +230,9 @@ class ChatBot:
 
     def clear_conversations(self):
         sid = request.cookies.get("seperated_id")
+        t = request.cookies.get('t') or "1"
         if sid:
-            ConversationOfficial.clear(sid)
+            ConversationOfficial.clear("{}-ch{}".format(sid, t))
         return self.__proxy_result(self.chatgpt.clear_conversations(True, self.__get_token_key()))
 
     def set_conversation_title(self, conversation_id):
@@ -264,11 +270,12 @@ class ChatBot:
                                                       stream,
                                                       self.__get_token_key())
         sid = request.cookies.get('seperated_id')
+        t = request.cookies.get('t') or "1"
         return self.__process_stream(status, header, generator, stream,
                                      lambda talk_json: self.save_talk(conversation_id,
                                                                       message_id, model,
                                                                       parent_message_id,
-                                                                      prompt, talk_json, sid))
+                                                                      prompt, talk_json, "{}-ch{}".format(sid, t)))
 
     def goon(self):
         payload = request.json
