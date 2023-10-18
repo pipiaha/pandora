@@ -17,13 +17,21 @@ class ConversationOfficial(Base):
 
     conversation_id = Column(Text, primary_key=True, autoincrement=False)
     title = Column(Text, nullable=False)
+    seperated_id = Column(Text, nullable=True)
     create_time = Column(Integer, nullable=False)
 
     @staticmethod
-    def get_list(offset, limit):
-        total = session.query(func.count(ConversationOfficial.conversation_id)).scalar()
-        return total, session.query(ConversationOfficial).order_by(ConversationOfficial.create_time.desc()).limit(
-            limit).offset(offset).all()
+    def get_list(offset, limit, sid=None):
+        if not sid:
+            total = session.query(func.count(ConversationOfficial.conversation_id)).scalar()
+            return (total, session.query(ConversationOfficial).order_by(ConversationOfficial.create_time.desc()).limit(
+                limit).offset(offset).all())
+        total = (session.query(func.count(ConversationOfficial.conversation_id))
+                 .filter(ConversationOfficial.seperated_id == sid)
+                 .scalar())
+        return (total, session.query(ConversationOfficial)
+                .filter(ConversationOfficial.seperated_id == sid)
+                .order_by(ConversationOfficial.create_time.desc()).limit(limit).offset(offset).all())
 
     @staticmethod
     def get(conversation_id):
@@ -41,16 +49,21 @@ class ConversationOfficial(Base):
 
     @staticmethod
     def delete(conversation_id):
-        session.query(ConversationOfficial).filter(ConversationOfficial.conversation_id == conversation_id).delete()
+        (session.query(ConversationOfficial).filter(ConversationOfficial.conversation_id == conversation_id)
+         .update({"seperated_id": None}))
         session.commit()
 
     @staticmethod
-    def clear():
+    def clear(sid=None):
+        if sid:
+            session.query(ConversationOfficial).filter(ConversationOfficial.seperated_id == sid).update(
+                {"seperated_id": None})
+            session.commit()
         session.query(ConversationOfficial).delete()
         session.commit()
 
     @staticmethod
-    def new_conversation(conversation_id, title=None):
+    def new_conversation(conversation_id, title=None, sid=None):
         conv = ConversationOfficial.get(conversation_id)
 
         if not conv:
@@ -58,14 +71,17 @@ class ConversationOfficial(Base):
             conv.conversation_id = conversation_id
             conv.title = title or 'New chat'
             conv.create_time = dt.now().timestamp()
+            conv.seperated_id = sid
             conv.new()
         else:
             conv.title = title or 'New chat'
+            if sid:
+                conv.seperated_id = sid
             conv.save()
 
     @staticmethod
-    def wrap_conversation_list(offset, limit):
-        total, items = ConversationOfficial.get_list(offset, limit)
+    def wrap_conversation_list(offset, limit, sid=None):
+        total, items = ConversationOfficial.get_list(offset, limit, sid)
 
         stripped = []
         for item in items:
